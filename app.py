@@ -1,58 +1,34 @@
 import datetime
 import pandas as pd
 import streamlit as st
+import google.generativeai as genai
 
-# Page Configuration
-st.set_page_config(page_title="Weight Loss Tracker", page_icon="⚖️", layout="centered")
+# Configure AI
+genai.configure(api_key=st.secrets["GOOGLE_API_KEY"])
+model = genai.GenerativeModel('gemini-1.5-flash')
 
-# Initialize Session State
-if "log_data" not in st.session_state:
-    st.session_state.log_data = pd.DataFrame(columns=["Date", "Type", "Item", "Calories"])
+def estimate_calories(food_desc):
+    prompt = f"Estimate the calories in: {food_desc}. Provide only the integer number."
+    response = model.generate_content(prompt)
+    return int(response.text.strip())
 
-st.title("⚖️ Weight Loss Tracker")
-
-# --- New: Goal Settings Sidebar ---
-st.sidebar.header("⚙️ Your Settings")
-tdee = st.sidebar.number_input("Your Estimated Daily Maintenance (TDEE) kcal", value=2200, step=50)
+st.set_page_config(page_title="AI Calorie Tracker", page_icon="🥗", layout="centered")
 
 # --- Log Entry Sidebar ---
-st.sidebar.header("📝 Log Entry")
-log_date = st.sidebar.date_input("Date", datetime.date.today())
-entry_type = st.sidebar.radio("Category", ["Food (+)", "Exercise (-)"])
-item_name = st.sidebar.text_input("Description")
-calories = st.sidebar.number_input("Calories", min_value=0, step=10, value=100)
+st.sidebar.header("📝 Smart Log")
+item_name = st.sidebar.text_input("What did you eat?", placeholder="e.g., 2 eggs and a banana")
+entry_type = "Food (+)"
 
-if st.sidebar.button("Add"):
-    new_row = pd.DataFrame({"Date": [log_date], "Type": [entry_type], "Item": [item_name], "Calories": [int(calories)]})
-    st.session_state.log_data = pd.concat([st.session_state.log_data, new_row], ignore_index=True)
-    st.rerun()
+if st.sidebar.button("Calculate & Add"):
+    if item_name:
+        with st.spinner("AI is calculating..."):
+            cals = estimate_calories(item_name)
+            # Add to session state
+            new_row = pd.DataFrame({"Date": [datetime.date.today()], "Type": [entry_type], "Item": [item_name], "Calories": [cals]})
+            st.session_state.log_data = pd.concat([st.session_state.log_data, new_row], ignore_index=True)
+            st.sidebar.success(f"Added {cals} kcal!")
+    else:
+        st.sidebar.error("Please enter a food item.")
 
-# --- Main Dashboard ---
-if not st.session_state.log_data.empty:
-    df = st.session_state.log_data.copy()
-    df["Date"] = pd.to_datetime(df["Date"]).dt.date
-    
-    # Calculate Daily Totals
-    daily_food = df[df["Type"] == "Food (+)"].groupby("Date")["Calories"].sum()
-    daily_ex = df[df["Type"] == "Exercise (-)"].groupby("Date")["Calories"].sum()
-    
-    summary = pd.DataFrame({"Food": daily_food, "Exercise": daily_ex}).fillna(0)
-    summary["Net_Intake"] = summary["Food"] - summary["Exercise"]
-    # Calorie Balance relative to TDEE
-    summary["Deficit_Surplus"] = tdee - summary["Net_Intake"]
-    
-    # Weight Prediction: 1kg fat ≈ 7700 kcal
-    summary["Est_Weight_Change_kg"] = summary["Deficit_Surplus"] / 7700
-
-    st.subheader("📊 Your Daily Progress")
-    st.dataframe(summary.sort_index(ascending=False), use_container_width=True)
-
-    # Weekly Summary
-    last_week = summary.tail(7)
-    total_est_change = last_week["Est_Weight_Change_kg"].sum()
-    
-    st.metric("Estimated Weekly Weight Impact", f"{total_est_change:.2f} kg")
-    st.caption("Negative value = Estimated weight loss. Positive value = Estimated weight gain.")
-else:
-    st.info("Log your first entry to see your progress.")
+# ... (Include your existing Dashboard code from the previous step here
     
